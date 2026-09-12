@@ -1,6 +1,7 @@
 const layout = [3, 3, 4, 4, 4, 4]
 const key = 'seat-change-classroom'
 const historyKey = 'seat-change-history'
+const deskPairs = [[0, 1], [2, 3], [4, 5]]
 const students = Array.from({ length: 22 }, (_, index) => index + 1)
 let draggedSeat = null
 let selectedSeat = null
@@ -16,12 +17,9 @@ const seatPairs = (arrangement) => {
   let cursor = 0
   layout.forEach((size) => columns.push(arrangement.slice(cursor, cursor += size)))
   const pairs = []
-  for (let row = 0; row < Math.max(...layout); row += 1) {
-    const rowStudents = columns.map((column) => column[row]).filter(Boolean)
-    for (let index = 0; index < rowStudents.length - 1; index += 1) {
-      pairs.push([rowStudents[index], rowStudents[index + 1]].sort((a, b) => a - b).join('-'))
-    }
-  }
+  for (let row = 0; row < Math.max(...layout); row += 1) deskPairs.forEach(([left, right]) => {
+    if (columns[left][row] && columns[right][row]) pairs.push([columns[left][row], columns[right][row]].sort((a, b) => a - b).join('-'))
+  })
   return pairs
 }
 
@@ -38,15 +36,15 @@ const historicalPairMarks = (arrangement) => {
   layout.forEach((size) => columns.push(Array.from({ length: size }, () => ({ position: cursor, student: arrangement[cursor++] }))))
   const marks = new Map()
   for (let row = 0; row < Math.max(...layout); row += 1) {
-    const rowSeats = columns.map((column) => column[row]).filter(Boolean)
-    for (let index = 0; index < rowSeats.length - 1; index += 1) {
-      const [left, right] = [rowSeats[index], rowSeats[index + 1]]
+    deskPairs.forEach(([leftColumn, rightColumn]) => {
+      const [left, right] = [columns[leftColumn][row], columns[rightColumn][row]]
+      if (!left || !right) return
       const count = counts.get([left.student, right.student].sort((a, b) => a - b).join('-')) || 0
       if (count) {
         marks.set(left.position, Math.max(marks.get(left.position) || 0, count))
         marks.set(right.position, Math.max(marks.get(right.position) || 0, count))
       }
-    }
+    })
   }
   return marks
 }
