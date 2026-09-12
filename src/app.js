@@ -2,6 +2,7 @@ const layout = [3, 3, 4, 4, 4, 4]
 const key = 'seat-change-classroom'
 const students = Array.from({ length: 22 }, (_, index) => index + 1)
 let draggedSeat = null
+let selectedSeat = null
 
 const shuffled = (items) => {
   const copy = [...items]
@@ -39,10 +40,18 @@ const renderSeats = () => {
   grid.innerHTML = layout.map((column) => `<div class="seat-column">${Array.from({ length: column }, () => {
     const position = cursor
     const student = seats[cursor++]
-    return `<button class="seat" draggable="true" data-position="${position}" aria-label="${position + 1}번 자리, ${student}번 학생"><span class="seat-number">${position + 1}</span><strong>${student}</strong></button>`
+    return `<button class="seat ${selectedSeat === position ? 'selected' : ''}" draggable="true" data-position="${position}" aria-pressed="${selectedSeat === position}" aria-label="${position + 1}번 자리, ${student}번 학생"><span class="seat-number">${position + 1}</span><strong>${student}</strong></button>`
   }).join('')}</div>`).join('')
 
   grid.querySelectorAll('.seat').forEach((seat) => {
+    seat.addEventListener('click', () => {
+      const target = Number(seat.dataset.position)
+      if (selectedSeat === null) { selectedSeat = target; renderSeats(); return }
+      if (selectedSeat === target) { selectedSeat = null; renderSeats(); return }
+      ;[seats[selectedSeat], seats[target]] = [seats[target], seats[selectedSeat]]
+      selectedSeat = null
+      save(); renderSeats(); animate()
+    })
     seat.addEventListener('dragstart', (event) => { draggedSeat = Number(seat.dataset.position); event.dataTransfer.effectAllowed = 'move'; seat.classList.add('dragging') })
     seat.addEventListener('dragend', () => { draggedSeat = null; seat.classList.remove('dragging') })
     seat.addEventListener('dragover', (event) => event.preventDefault())
@@ -66,4 +75,7 @@ app.innerHTML = `
 
 renderSeats()
 document.querySelector('#random').addEventListener('click', () => { seats = shuffled(students); save(); renderSeats(); animate() })
-document.querySelector('#move').addEventListener('click', () => { seats = [...seats.slice(1), seats[0]]; save(); renderSeats(); animate() })
+document.querySelector('#move').addEventListener('click', () => {
+  seats = seats.map((student) => student === students.length ? 1 : student + 1)
+  save(); renderSeats(); animate()
+})
