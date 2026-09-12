@@ -9,6 +9,6 @@ createServer((request, response) => {
   const url = request.url === '/' ? '/index.html' : request.url.split('?')[0]
   const file = normalize(join(root, url))
   if (!file.startsWith(root) || !existsSync(file)) { response.writeHead(404); response.end(); return }
-  response.writeHead(200, { 'Content-Type': types[extname(file)] || 'application/octet-stream' })
+  response.writeHead(200, { 'Content-Type': types[extname(file)] || 'application/octet-stream', 'Cache-Control': 'no-store' })
   createReadStream(file).pipe(response)
 }).listen(5173, '127.0.0.1', () => console.log('http://localhost:5173'))

@@ -1,12 +1,28 @@
 const layout = [3, 3, 4, 4, 4, 4]
 const key = 'seat-change-classroom'
 const historyKey = 'seat-change-history'
+const countKey = 'seat-change-student-count'
 const deskPairs = [[0, 1], [2, 3], [4, 5]]
-const students = Array.from({ length: 22 }, (_, index) => index + 1)
+const groupSeats = [
+  { name: '1모둠', seats: ['0-0', '0-1', '0-2', '1-2', '1-1', '1-0'] },
+  { name: '2모둠', seats: ['2-0', '2-1', '3-1', '3-0'] },
+  { name: '3모둠', seats: ['2-2', '2-3', '3-3', '3-2'] },
+  { name: '4모둠', seats: ['4-0', '4-1', '5-1', '5-0'] },
+  { name: '5모둠', seats: ['4-2', '4-3', '5-3', '5-2'] },
+]
+const groupForSeat = (column, row) => groupSeats.find((group) => group.seats.includes(`${column}-${row}`))
+const seatPosition = (coordinate) => {
+  const [column, row] = coordinate.split('-').map(Number)
+  return layout.slice(0, column).reduce((sum, size) => sum + size, 0) + row
+}
+const capacity = layout.reduce((sum, size) => sum + size, 0)
+let studentCount = Number(localStorage.getItem(countKey)) || capacity
+const studentNumbers = () => Array.from({ length: studentCount }, (_, index) => index + 1)
 let draggedSeat = null
 let selectedSeat = null
 let isDrawing = false
 let selectedHistoryDate = null
+let showGroupNumbers = false
 
 const loadHistory = () => {
   try { return JSON.parse(localStorage.getItem(historyKey)) || {} } catch { return {} }
@@ -63,7 +79,7 @@ const load = () => {
     const saved = JSON.parse(localStorage.getItem(key))
     if (Array.isArray(saved) && saved.length === 22) return saved
   } catch { /* first visit */ }
-  return shuffled(students)
+  return shuffled([...studentNumbers(), ...Array(capacity - studentCount).fill(null)])
 }
 
 let seats = load()
@@ -81,15 +97,42 @@ const animate = (positions = null) => {
   })
 }
 
+const animateSeatSwap = (from, to, values) => {
+  const source = document.querySelector(`.seat[data-position="${from}"]`)
+  const target = document.querySelector(`.seat[data-position="${to}"]`)
+  if (!source || !target) return
+  const motions = [
+    { value: values[0], start: source.getBoundingClientRect(), end: target.getBoundingClientRect() },
+    { value: values[1], start: target.getBoundingClientRect(), end: source.getBoundingClientRect() },
+  ]
+  source.classList.add('swap-target')
+  target.classList.add('swap-target')
+  motions.forEach(({ value, start, end }) => {
+    const ghost = document.createElement('div')
+    ghost.className = 'swap-ghost'
+    ghost.textContent = value
+    Object.assign(ghost.style, { left: `${start.left}px`, top: `${start.top}px`, width: `${start.width}px`, height: `${start.height}px` })
+    document.body.append(ghost)
+    window.requestAnimationFrame(() => { ghost.style.transform = `translate(${end.left - start.left}px, ${end.top - start.top}px)` })
+    window.setTimeout(() => ghost.remove(), 470)
+  })
+  window.setTimeout(() => { source.classList.remove('swap-target'); target.classList.remove('swap-target') }, 470)
+}
+
 const renderSeats = () => {
   const grid = document.querySelector('.seat-grid')
   let cursor = 0
   const marks = historicalPairMarks(displaySeats)
-  grid.innerHTML = layout.map((column) => `<div class="seat-column">${Array.from({ length: column }, () => {
+  grid.classList.toggle('show-group-numbers', showGroupNumbers)
+  grid.innerHTML = layout.map((column, columnIndex) => `<div class="seat-column ${[1, 3].includes(columnIndex) ? 'group-column-gap' : ''}">${Array.from({ length: column }, (_, rowIndex) => {
     const position = cursor
     const student = displaySeats[cursor++]
     const historyMark = marks.get(position)
-    return `<button class="seat ${selectedSeat === position ? 'selected' : ''}" draggable="true" data-position="${position}" aria-pressed="${selectedSeat === position}" aria-label="${student}번 학생${historyMark ? `, 이전 짝 ${historyMark}회` : ''}"><strong>${student}</strong>${historyMark ? `<span class="pair-badge">이전 짝 ${historyMark}회</span>` : ''}</button>`
+    const group = groupForSeat(columnIndex, rowIndex)
+    const isGroupStart = group?.seats[0] === `${columnIndex}-${rowIndex}`
+    const groupSeatNumber = group ? group.seats.indexOf(`${columnIndex}-${rowIndex}`) + 1 : ''
+    const groupBreak = rowIndex === 2 && columnIndex >= 2
+    return `<button class="seat ${selectedSeat === position ? 'selected' : ''} ${isGroupStart ? 'group-start' : ''} ${groupBreak ? 'group-row-gap' : ''}" draggable="true" data-position="${position}" data-group="${group?.name || ''}" aria-pressed="${selectedSeat === position}" aria-label="${group?.name || ''} ${groupSeatNumber}번 자리, ${student ? `${student}번 학생` : '빈 자리'}${historyMark ? `, 이전 짝 ${historyMark}회` : ''}"><strong>${student ?? ''}</strong><span class="group-number">${groupSeatNumber}번</span>${isGroupStart ? `<span class="group-label">${group.name}</span>` : ''}${historyMark ? `<span class="pair-badge">이전 짝 ${historyMark}회</span>` : ''}</button>`
   }).join('')}</div>`).join('')
 
   grid.querySelectorAll('.seat').forEach((seat) => {
@@ -99,10 +142,11 @@ const renderSeats = () => {
       if (selectedSeat === null) { selectedSeat = target; renderSeats(); return }
       if (selectedSeat === target) { selectedSeat = null; renderSeats(); return }
       const from = selectedSeat
+      const values = [seats[from], seats[target]]
       ;[seats[from], seats[target]] = [seats[target], seats[from]]
       displaySeats = [...seats]
       selectedSeat = null
-      save(); renderSeats(); animate([from, target])
+      save(); renderSeats(); animateSeatSwap(from, target, values)
     })
     seat.addEventListener('dragstart', (event) => { if (isDrawing) { event.preventDefault(); return } draggedSeat = Number(seat.dataset.position); event.dataTransfer.effectAllowed = 'move'; seat.classList.add('dragging') })
     seat.addEventListener('dragend', () => { draggedSeat = null; seat.classList.remove('dragging') })
@@ -111,12 +155,43 @@ const renderSeats = () => {
       event.preventDefault()
       const target = Number(seat.dataset.position)
       const from = draggedSeat
+      const values = from === null ? null : [seats[from], seats[target]]
       if (from !== null && from !== target) [seats[from], seats[target]] = [seats[target], seats[from]]
       displaySeats = [...seats]
       draggedSeat = null
-      save(); renderSeats(); animate([from, target])
+      save(); renderSeats()
+      if (from !== null && from !== target) animateSeatSwap(from, target, values)
     })
   })
+  renderLunchLine()
+  renderCafeteria()
+}
+
+const renderLunchLine = () => {
+  const target = document.querySelector('#lunch-line')
+  if (!target) return
+  target.innerHTML = groupSeats.map((group) => {
+    const students = group.seats.map(seatPosition).map((position) => seats[position]).filter(Boolean)
+    return `<li><strong>${group.name}</strong><span class="lunch-people">${students.length ? students.map((student) => `<i>${student}</i>`).join('') : '—'}</span></li>`
+  }).join('')
+}
+
+const lunchOrder = () => groupSeats.flatMap((group) => group.seats.map(seatPosition).map((position) => seats[position]).filter(Boolean))
+
+const renderCafeteria = () => {
+  const target = document.querySelector('#cafeteria')
+  if (!target) return
+  const line = lunchOrder()
+  const seatingSlots = [11, 10, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+  const upper = Array(12).fill(null)
+  const lower = Array(12).fill(null)
+  line.slice(0, 11).forEach((student, index) => { lower[seatingSlots[index]] = student })
+  line.slice(11).forEach((student, index) => { upper[seatingSlots[index]] = student })
+  const person = (student) => `<span class="cafeteria-person">${student ?? ''}</span>`
+  target.innerHTML = Array.from({ length: 4 }, (_, tableIndex) => {
+    const start = tableIndex * 3
+    return `<div class="cafeteria-table"><div class="cafeteria-seats top-seats">${upper.slice(start, start + 3).map(person).join('')}</div><div class="table-top"></div><div class="cafeteria-seats bottom-seats">${lower.slice(start, start + 3).map(person).join('')}</div></div>`
+  }).join('')
 }
 
 const renderSavedDates = () => {
@@ -151,20 +226,22 @@ const renderDateRecord = () => {
 
 app.innerHTML = `
   <main class="app-shell">
-    <header class="topbar"><a class="brand" href="#top">자리 변경</a><div class="class-info"><span>우리 반</span><i></i><strong>22명</strong></div><span class="layout-label">3 · 3 · 4 · 4 · 4 · 4</span></header>
     <section class="hero" id="top"><div><h1>오늘의 자리</h1></div><div class="actions"><button class="outline-action" id="move"><span class="arrow">←</span> 한 칸 앞으로</button><button class="outline-action" id="random"><span class="spark">✦</span> 랜덤 배치</button><button class="primary-action" id="fake"><span class="spark">✦</span> 자리 뽑기</button></div></section>
-    <section class="history-tools"><div class="save-place"><input id="save-date" type="date" aria-label="자리 배치 날짜"><button id="save-history">이 날짜로 저장</button></div><details class="saved-dates"><summary>저장된 날짜</summary><ul id="saved-dates"></ul></details></section><section class="date-pair-record" id="date-pair-record" hidden></section>
+    <section class="history-tools"><div class="save-place"><input id="save-date" type="date" aria-label="자리 배치 날짜"><button id="save-history">이 날짜로 저장</button></div><button class="group-view-button" id="toggle-groups">모둠 번호 보기</button><details class="saved-dates"><summary>저장된 날짜</summary><ul id="saved-dates"></ul></details></section><section class="date-pair-record" id="date-pair-record" hidden></section>
     <section class="classroom" aria-label="학급 자리 배치도"><div class="front-line"><span>교탁</span></div><div class="seat-area"><div class="seat-grid" style="--columns: 6"></div></div><div class="back-label">뒤쪽</div></section>
+    <section class="lunch-line"><h2>급식 줄</h2><ol id="lunch-line"></ol></section>
+    <section class="cafeteria"><h2>급식실 자리</h2><div id="cafeteria"></div></section>
     <footer>자리 변경</footer>
+    <dialog id="create-dialog"><form method="dialog" class="create-form"><button class="dialog-close" value="cancel" aria-label="닫기">×</button><p>학생 수</p><input id="student-count" type="number" min="1" max="${capacity}" value="${studentCount}" autofocus><span>명</span><button id="create-class" value="default">생성</button></form></dialog>
   </main>`
 
 renderSeats()
 document.querySelector('#save-date').value = new Date().toISOString().slice(0, 10)
 renderSavedDates()
 renderDateRecord()
-document.querySelector('#random').addEventListener('click', () => { seats = shuffled(students); displaySeats = [...seats]; save(); renderSeats(); animate() })
+document.querySelector('#random').addEventListener('click', () => { seats = shuffled([...studentNumbers(), ...Array(capacity - studentCount).fill(null)]); displaySeats = [...seats]; save(); renderSeats(); animate() })
 document.querySelector('#move').addEventListener('click', () => {
-  seats = seats.map((student) => student === students.length ? 1 : student + 1)
+  seats = seats.map((student) => student === null ? null : student === studentCount ? 1 : student + 1)
   displaySeats = [...seats]
   save(); renderSeats(); animate()
 })
@@ -175,7 +252,7 @@ document.querySelector('#fake').addEventListener('click', () => {
   button.disabled = true
   let turns = 0
   const timer = window.setInterval(() => {
-    displaySeats = shuffled(students)
+    displaySeats = shuffled([...studentNumbers(), ...Array(capacity - studentCount).fill(null)])
     renderSeats(); animate()
     turns += 1
     if (turns < 9) return
@@ -198,3 +275,21 @@ document.querySelector('#save-history').addEventListener('click', () => {
   renderSavedDates()
   renderDateRecord()
 })
+document.querySelector('#toggle-groups').addEventListener('click', () => {
+  showGroupNumbers = !showGroupNumbers
+  document.querySelector('#toggle-groups').textContent = showGroupNumbers ? '모둠 번호 숨기기' : '모둠 번호 보기'
+  document.querySelector('.seat-grid').classList.toggle('show-group-numbers', showGroupNumbers)
+})
+document.querySelector('#create-class').addEventListener('click', (event) => {
+  event.preventDefault()
+  const input = document.querySelector('#student-count')
+  const nextCount = Math.max(1, Math.min(capacity, Number(input.value) || capacity))
+  studentCount = nextCount
+  localStorage.setItem(countKey, String(studentCount))
+  seats = shuffled([...studentNumbers(), ...Array(capacity - studentCount).fill(null)])
+  displaySeats = [...seats]
+  selectedSeat = null
+  save(); renderSeats()
+  document.querySelector('#create-dialog').close()
+})
+if (!localStorage.getItem(key)) document.querySelector('#create-dialog').showModal()
